@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  user-service:
+    build: ./user-service
+    ports:
+      - "5001:5001"
+    environment:
+      - APP_ENV=local
+      - APP_VERSION=1.0.0
+
+  product-service:
+    build: ./product-service
+    ports:
+      - "5002:5002"
+    environment:
+      - APP_ENV=local
+      - APP_VERSION=1.0.0
+
+  order-service:
+    build: ./order-service
+    ports:
+      - "5003:5003"
+    environment:
+      - APP_ENV=local
+      - APP_VERSION=1.0.0
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "5004:5004"
+    environment:
+      - APP_ENV=local
+      - APP_VERSION=1.0.0
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:8080"
+    environment:
+      - APP_ENV=local
+      - APP_VERSION=1.0.0
+      - USER_SERVICE_URL=http://user-service:5001
+      - PRODUCT_SERVICE_URL=http://product-service:5002
+      - ORDER_SERVICE_URL=http://order-service:5003
+      - NOTIFICATION_SERVICE_URL=http://notification-service:5004
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+      - notification-service

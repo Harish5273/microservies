@@ -1,66 +1,41 @@
 pipeline {
     agent any
-
     environment {
-        SERVICE_NAME        = 'notification-service'
-        AWS_REGION          = 'us-east-1'
-        AWS_ACCOUNT_ID      = '123456789012'
-        ECR_REGISTRY        = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        IMAGE_TAG           = "${env.BUILD_NUMBER}-${env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'}"
-        GITOPS_REPO_NAME    = 'microservices-gitops'
-        AWS_CREDENTIALS_ID  = 'aws-credentials'
-        GIT_CREDS_ID        = 'git-credentials'
+        AWS_REGION     = 'us-east-1'
+        AWS_ACCOUNT_ID = "${sh(script: 'aws sts get-caller-identity --query Account --output text', returnStdout: true).trim()}"
+        ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        // CHANGE THIS line for each service (e.g., 'product-service', 'order-service'):
+        SERVICE_NAME   = 'notification-service'
+        IMAGE_TAG      = "${env.BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
     }
-
     stages {
         stage('Test & Lint') {
             steps {
                 echo "===> Testing ${SERVICE_NAME}..."
-                sh 'python3 -m py_compile notification-service/app.py'
+                sh "python3 -m py_compile ${SERVICE_NAME}/app.py"
             }
         }
-
         stage('AWS ECR Login') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
-                    sh 'aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}'
-                }
+                sh 'aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}'
             }
         }
-
         stage('Build & Push Docker Image') {
             steps {
-                echo "===> Building ${SERVICE_NAME} image..."
-                sh """
-                    docker build -t ${ECR_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG} -t ${ECR_REGISTRY}/${SERVICE_NAME}:latest ./notification-service
-                    docker push ${ECR_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}
-                    docker push ${ECR_REGISTRY}/${SERVICE_NAME}:latest
-                """
-            }
-        }
+                echo "===> Building image for ${ECR_REGISTRY}/${SERVICE_NAME}..."
+                
 
-        stage('Update GitOps Repo') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: env.GIT_CREDS_ID, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
-                    sh '''
-                        rm -rf ${GITOPS_REPO_NAME}
-                        git clone https://${GIT_USER}:${GIT_PASS}@github.com/<YOUR-GITHUB-USERNAME>/${GITOPS_REPO_NAME}.git
-                        cd ${GITOPS_REPO_NAME}/k8s
-                        sed -i "s|image: ${ECR_REGISTRY}/${SERVICE_NAME}:.*|image: ${ECR_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}|g" 04-notification-service.yaml
-                        git config user.name "jenkins-bot"
-                        git config user.email "jenkins@cloud.local"
-                        git add 04-notification-service.yaml
-                        git diff --staged --quiet || git commit -m "chore(gitops): update ${SERVICE_NAME} to ${IMAGE_TAG}"
-                        git push origin main
-                    '''
+dir("${SERVICE_NAME}") {
+                    sh 'docker build -t ${ECR_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG} -t ${ECR_REGISTRY}/${SERVICE_NAME}:latest .'
+                    sh 'docker push ${ECR_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}'
+                    sh 'docker push ${ECR_REGISTRY}/${SERVICE_NAME}:latest'
                 }
             }
         }
     }
-
     post {
         always {
-            sh "docker rmi ${ECR_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG} || true"
+            sh 'docker rmi ${ECR_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG} || true'
         }
     }
 }
